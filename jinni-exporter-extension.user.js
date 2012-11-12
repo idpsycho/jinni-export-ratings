@@ -9,4 +9,8 @@
 
 function load(src, fn) { var x=document.createElement('script'); x.type='text/javascript'; x.src=src; if (fn) { x.onreadystate=fn; x.onload=fn; } document.head.appendChild( x ); };
 
-load('http://p.brm.sk/jinni-exporter/jinni-exporter.js', function() { } );
+
+if ('locally')
+	load('http://l/jinni-exporter/jinni-exporter.js', function() { } );
+else
+	load('http://p.brm.sk/jinni-exporter/jinni-exporter.js', function() { } );
