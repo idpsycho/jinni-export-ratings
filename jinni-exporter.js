@@ -7,7 +7,6 @@ function trim(s){ return s.replace(/^\s+|\s+$/g,""); };
 var g_arrRatings = [];
 var g_arrTodo = [];
 var numLoading = 0;
-var keepGoing = 1;
 
 load_jquery();
 define_helpers();
@@ -59,12 +58,16 @@ function isLastPage()
 
 	return (btnText != 'next');
 }
+function refreshPage()
+{
+	$('.scrollerNumbers .activePage a').click();
+}
 function gotoNextPage()
 {
 	setTimeout(function()
 	{
 		var btnNext = $('.scrollerNumbers a:last');
-		if (keepGoing) btnNext.click();
+		if (isExportingEnabled()) btnNext.click();
 	}, 3000);
 
 	return true;
@@ -80,7 +83,11 @@ function isLocationRatings()
 
 function ready()
 {
-	if (!isLocationRatings('alerts otherwise'))
+	if (!isLocationRatings())
+		return;
+
+	// jinni is weird, sometimes returns empty page
+	if (!$('body>*').length)
 		return;
 
 
@@ -101,34 +108,33 @@ function ready()
 
 	}
 
-	showResultsInTextarea( isLastPage, false );
-
-	// we need to extract them serially
-	// otherwise site sometimes returns content not matching requested url
-	// and i want rows to clear off 1 by 1, so thats why not do sync ajax
-	g_arrTodo = arrNewRatings;
-	extractNextImdbLink();
-
-}
-function finishedExtracting()
-{
 	localStorage_set('my jinni ratings', g_arrRatings);
 
-	showResultsInTextarea( isLastPage(), true );
+	if (!isExportingEnabled())
+		return showInfo("Press 'Start' to start extracting..");
 
-	if (isExportingEnabled())
+	var nNew = arrNewRatings.length;
+	var msg = nNew ? 'Added/updated '+nNew+' ratings.' : '';
+	showInfo( msg );
+
+	if (!isLastPage())
 	{
-		if (isLastPage())
-		{
-			exportingToggle(0);
+		showInfo(msg+'<br>Going to the next page in 3 secs..');
+		return gotoNextPage();	// continue
+	}
+	else // on last page
+	{
+		exportingToggle(0);
 
-			if (g_arrRatings.length)
-				alert('That was the last page.\nYou can now copy your results.');
-			else
-				alert('Either you have no ratings on jinni yet..\nOr something went wrong..\nOr you are not logged in..');
+		// got to do that one by one, functions will call itself..
+		g_arrTodo = [];
+		for (var i=0; i < g_arrRatings.length; i++)
+		{
+			var r = g_arrRatings[i];
+			if (!r.imdb || !r.year)
+				g_arrTodo.push(r);
 		}
-		else
-			gotoNextPage();
+		extractNextImdbLink();
 	}
 }
 
@@ -159,16 +165,18 @@ function extractRatings(html)
 // extracting imdb links and release year
 function extractNextImdbLink()
 {
-	if (!keepGoing) return;
+	//if (!isExportingEnabled()) return;
+
+	showInfo("Exporting movie's year and imdb link..");
+	var nTotal = g_arrRatings.length;
+	var nTodo = g_arrTodo.length;
+	$('#jinniExporterCount').text( (nTotal-nTodo) +'/'+nTotal  );
 
 	var next = g_arrTodo.splice(0, 1)[0];
-
-	$('#jinniExporterCount').text( g_arrRatings.length - g_arrTodo.length );
-
 	if (next)
 		extractImdbFromLink(next.title, next.link);
 	else
-		finishedExtracting();
+		showInfo('Finished extracting..');
 }
 function extractImdbFromLink(title, link)
 {
@@ -194,20 +202,15 @@ function extractImdbFromHtml(title, resp, link)
 	if (title!=title_)
 		console.log(title+' (thats weird, title doesnt match)\n'+title_);
 
-	var row = $('[href="'+link+'"]');
-
 	var pos = g_arrRatings.findPosByAttr('title', title);
 	if (pos >= 0)
 	{
 		g_arrRatings[pos].year = year;
 		g_arrRatings[pos].imdb = imdb;
-		row.css('font-weight', 'bold');
+		localStorage_set('my jinni ratings', g_arrRatings);
 	}
 	else
-	{
 		console.log('cant find movie by that name, wtf');
-		row.css('color', 'red');
-	}
 
 	extractNextImdbLink();
 }
@@ -219,14 +222,14 @@ function extractImdbFromHtml(title, resp, link)
 function clearExported()
 {
 	localStorage_del('my jinni ratings');
-	$('#jinniExporterCount').text('0');
-	$('#jinniExporterResults').val('');
-	alert('Cleared.');
+	showInfo('Cleared.');
 	return false;
 }
 function stopAll()
 {
-	keepGoing = 0;
+	localStorage_del('jinni exporter enabled')
+	showInfo();
+
 	return false;
 }
 function saveExported()
@@ -237,7 +240,7 @@ function saveExported()
 
 function isExportingEnabled()
 {
-	return localStorage_get('jinni exporter status');
+	return localStorage_get('jinni exporter enabled');
 }
 function exportingToggle(action)
 {
@@ -251,30 +254,24 @@ function exportingToggle(action)
 			return '<a href="#" onclick="return exportingToggle(1)">start</a>'+s;
 	}
 
-	localStorage_set('jinni exporter status', action?'enabled':'');
+	localStorage_set('jinni exporter enabled', action?1:0);
 	if (action)
-		window.location.reload();
+		refreshPage();	// resubmits, so we dont jump to page 1
 	else
 		stopAll()
 
 	return false;
 }
-function showResultsInTextarea( isLastPage, isFinished )
+function showInfo(msgAdd)
 {
 	$('#jinniExporter').remove();
 
+	var nRatings = (localStorage_getArray('my jinni ratings')||[]).length;
 	var msg = 'Jinni Export Ratings - '+exportingToggle()+'<br>';
-	msg += 'You now have <span id="jinniExporterCount">'+g_arrRatings.length+'</span> ratings exported.<br>';
+	msg += 'You now have <span id="jinniExporterCount">'+nRatings+'</span> ratings exported.<br>';
 
-	if (isExportingEnabled())
-	{
-		if (!isLastPage && isFinished)
-			msg += '<small>Going to the next page in 3 sec...</small>';
-	}
-	else
-	{
-		msg += '<small>Click on "start" for exporting.</small>';
-	}
+	if (msgAdd)
+		msg += '<small>'+msgAdd+'</small>';
 
 	msg += '<br>';
 	msg += '<a href="#" onclick="return clearExported()">clear all</a>';
@@ -296,13 +293,13 @@ function showResultsInTextarea( isLastPage, isFinished )
 function ratingsInCSV()
 {
 	var arr = localStorage_getArray('my jinni ratings');
-	var csv = "'rating','year','title','link','imdb'\n";
+	var csv = '"rating","year","title","link","imdb"\n';
 
-	function esc(s) { return (''+s).replace(/'/g, "\\'"); }
-	for (var i=0; i < arr.length; i++)
+	function esc(s) { return (''+s).replace(/"/g, '""'); }	// replace dquote by twice dquote
+	for (var i=arr.length-1; i >= 0; i--)
 	{
 		var r = arr[i];
-		csv += "'{0}','{1}','{2}','{3}','{4}'\n".format(
+		csv += '"{0}","{1}","{2}","{3}","{4}"\n'.format(
 			esc(r.rating), esc(r.year||''), esc(r.title), esc(r.link), esc(r.imdb||'')
 		);
 	}
