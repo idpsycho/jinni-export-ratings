@@ -8,6 +8,9 @@ var g_arrRatings = [];
 var g_arrTodo = [];
 var numLoading = 0;
 
+var g_imdbRemainsToRate = 0;
+var g_imdbFailLimit = 5;
+
 load_jquery();
 define_helpers();
 ready();
@@ -72,20 +75,179 @@ function gotoNextPage()
 
 	return true;
 }
-function isLocationRatings()
+function isLocationJinniRatings()
 {
+	if (window.location.host != 'www.jinni.com')
+		return false;
+
 	var url = ''+window.location.href;
 	if (url.endsWith('ratings') ||
 		url.endsWith('ratings/') ||
 		url.endsWith('ratings/#'))
 		return true;
 }
+function isLocationImdbRatings()
+{
+	if (window.location.host != 'www.imdb.com')
+		return false;
+
+	var url = ''+window.location.href;
+	if (url.endsWith('ratings') ||
+		url.endsWith('ratings/') ||
+		url.endsWith('ratings#'))
+		return true;
+}
 
 function ready()
 {
-	if (!isLocationRatings())
+	if (isLocationJinniRatings())
+		return readyJinniRatings();
+
+	if (isLocationImdbRatings())
+		return readyImdbRatings();
+}
+
+function readyImdbRatings()
+{
+	var div = $('<div style="background: #F5DE50; padding: 10px 20px; color: #000; font-size: 14px; line-height: 20px; clear: both; border-radius: 5px; border: 1px solid #000; box-shadow: 0 0 3px #000;"></div>');
+
+	div.append('<div>Hello, so far you can only import ratings from jinni.</div>');
+	div.append('<div id="import_jinni_info">Put CSV from jinni-export-ratings below and press \'import\'.</div>');
+	div.append('<textarea id="import_jinni_ratings" style="width: 95%; display: block; margin: 10px 0; min-height: 100px; font-size: 8px;"></textarea>');
+	div.append('<a href="#" onclick="return import_jinni_ratings()" style="float: right;">Import !</a>');
+	div.append('<div id="jinni_imported" style="clear: both; font-size: 12px; overflow: hidden;">');
+	div.append('<br style="clear: both;">');
+
+	$('h1.header').after(div);
+}
+
+function imdbShowInfo(err)
+{
+	var msg = err || '';
+
+	if (!msg)
+	{
+		if (g_imdbRemainsToRate)
+			msg = 'Rating.. still have '+g_imdbRemainsToRate+' movies to rate..';
+		else
+			msg = 'Nothing to rate..';
+	}
+
+	$('#import_jinni_info').text(msg);
+}
+/*
+extact auth key, however, it is only valid for one movie
+	var auth = $('.rating.rating-list:eq(0)').data('auth');
+	if (!auth)
+		return alert('something went wrong. maybe you dont have any movie rated. you need one, i retrieve authorization key from there..');
+
+*/
+function import_jinni_ratings()
+{
+	var csv = $('#import_jinni_ratings').val();
+
+	var arr = CSVToArray(csv);
+	if (!arr || !arr.length)
 		return;
 
+	g_imdbRemainsToRate = arr.length;
+	imdbShowInfo();
+
+	var col_rating = 0;
+	var col_year = 1;
+	var col_title = 2;
+	var col_jinni = 3;
+	var col_imdb = 4;
+
+	var arrToRate = [];
+	for (var i=0; i<arr.length; i++)
+	{
+		var a = arr[i];
+		var url = a[col_imdb];
+		if (!url || a[0]=='rating')	// missing imdb link or header row
+		{
+			g_imdbRemainsToRate--;
+			continue;
+		}
+
+		var title = a[col_title];
+		var rating = parseInt(a[col_rating]) || 1;	// imdb doesnt have rating 0'
+		var m_id = (url.match(/tt[\d]+$/)||[])[0];
+		var year = a[col_year];
+
+		arrToRate.push( {url:url, rating: rating, m_id: m_id, title: title, year:year} );
+	}
+
+	imdbRateNext(arrToRate);
+}
+
+
+
+function imdbRateNext(arrToRate)
+{
+	if (!arrToRate.length)
+		return;
+
+	var movie = arrToRate[0];
+	var r = movie.rating;
+	var m_id = movie.m_id;
+
+	$.get(movie.url, function(resp)
+	{
+		var auth = (resp.match(/data-auth="([^"]+)/)||[0,])[1];
+		if (!auth)
+			return imdbShowInfo('could not extract authorization key for rating');
+
+		// now that we have authorization key, we can send rating..
+		$.ajax(
+		{
+			url: "http://www.imdb.com/ratings/_ajax/title",
+			data: { tconst: movie.m_id, rating: r, auth: auth, tracking_tag: 'list' },
+			type: 'POST',
+			dataType: 'json',
+			success: function()
+			{
+				var info = '<b>{0}</b> - <a href="{1}">{2} ({3})</a><br>'
+				info = info.format(r, movie.url, movie.title, movie.year);
+				$('#jinni_imported').prepend( info );
+
+				g_imdbRemainsToRate--;
+				imdbShowInfo();
+
+				setTimeout( function() {
+					arrToRate.splice(0, 1);
+					imdbRateNext(arrToRate, auth);
+				}, 1000);
+			},
+			error: function()
+			{
+				var msg = '<div>ERROR ({0}): could not rate movie: <a href="{1}">{2}</a></div>';
+				msg = msg.format(--g_imdbFailLimit, movie.url, movie.title);
+				$('#jinni_imported').prepend(msg);
+
+				if (g_imdbFailLimit > 0)
+					setTimeout( function() {
+							imdbRateNext(arrToRate, auth);
+						}, 1000);
+			}
+		});
+		// ajax
+
+	}).error( function()
+	{
+		var msg = '<div>ERROR ({0}): could not load movie page: <a href="{1}">{2}</a></div>';
+		msg = msg.format(--g_imdbFailLimit, movie.url, movie.title);
+		$('#jinni_imported').prepend(msg);
+
+		if (g_imdbFailLimit > 0)
+			setTimeout( function() {
+					imdbRateNext(arrToRate, auth);
+				}, 1000);
+	});
+}
+
+function readyJinniRatings()
+{
 	// jinni is weird, sometimes returns empty page
 	if (!$('body>*').length)
 		return;
@@ -202,7 +364,7 @@ function extractImdbFromHtml(title, resp, link)
 	if (title!=title_)
 		console.log(title+' (thats weird, title doesnt match)\n'+title_);
 
-	var pos = g_arrRatings.findPosByAttr('title', title);
+	var pos = g_arrRatings.findPosByAttr('link', link);
 	if (pos >= 0)
 	{
 		g_arrRatings[pos].year = year;
@@ -366,6 +528,49 @@ function define_helpers()
 	String.prototype.trim = function(){ return this.replace(/^\s+|\s+$/g,""); };
 }
 
+
+
+
+
+
+
+
+
+
+
+function CSVToArray( strData, strDelimiter)
+{
+	strDelimiter = (strDelimiter || ",");
+	var objPattern = new RegExp(
+			( "(\\" + strDelimiter + "|\\r?\\n|\\r|^)" +
+			"(?:\"([^\"]*(?:\"\"[^\"]*)*)\"|" +
+				"([^\"\\" + strDelimiter + "\\r\\n]*))"
+		), "gi");
+
+	var arrData = [[]];
+	var arrMatches = null;
+
+	while (arrMatches = objPattern.exec( strData ))
+	{
+		var strMatchedDelimiter = arrMatches[ 1 ];
+		if (strMatchedDelimiter.length && (strMatchedDelimiter != strDelimiter))
+			arrData.push( [] );
+
+		if (arrMatches[ 2 ])
+		{
+			var strMatchedValue = arrMatches[ 2 ].replace(
+				new RegExp( "\"\"", "g" ),
+				"\""
+				);
+		}
+		else
+		{
+			var strMatchedValue = arrMatches[ 3 ];
+		}
+		arrData[ arrData.length - 1 ].push( strMatchedValue );
+	}
+	return( arrData );
+}
 
 function load_jquery()
 {
