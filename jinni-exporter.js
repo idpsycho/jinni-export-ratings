@@ -164,7 +164,7 @@ function import_jinni_ratings()
 	{
 		var a = arr[i];
 		var url = a[col_imdb];
-		if (!url || a[0]=='rating')	// missing imdb link or header row
+		if (!url || url=='undefined' || a[0]=='rating')	// missing imdb link or header row
 		{
 			g_imdbRemainsToRate--;
 			continue;
