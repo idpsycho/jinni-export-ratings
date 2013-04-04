@@ -3,6 +3,7 @@
 String.prototype.trim = function(){ return this.replace(/^\s+|\s+$/g,""); };
 function trim(s){ return s.replace(/^\s+|\s+$/g,""); };
 
+var g_version = 'v4.4.2013';
 
 var g_arrRatings = [];
 var g_arrTodo = [];
@@ -17,6 +18,44 @@ ready();
 
 
 
+/**
+ * Google Analytics JS v1
+ * http://code.google.com/p/google-analytics-js/
+ * Copyright (c) 2009 Remy Sharp remysharp.com / MIT License
+ * $Date: 2009-02-25 14:25:01 +0000 (Wed, 25 Feb 2009) $
+ */
+function gaTrack(urchinCode, domain, url) {
+
+  function rand(min, max) {
+      return min + Math.floor(Math.random() * (max - min));
+  }
+
+  var i=1000000000,
+      utmn=rand(i,9999999999), //random request number
+      cookie=rand(10000000,99999999), //random cookie number
+      random=rand(i,2147483647), //number under 2147483647
+      today=(new Date()).getTime(),
+      win = window.location.host + window.location.pathname,	// FIX: without '#...'
+      img = new Image(),
+      urchinUrl = 'http://www.google-analytics.com/__utm.gif?utmwv=1.3&utmn='
+          +utmn+'&utmsr=-&utmsc=-&utmul=-&utmje=0&utmfl=-&utmdt=-&utmhn='
+          +domain+'&utmr='+win+'&utmp='
+          +url+'&utmac='
+          +urchinCode+'&utmcc=__utma%3D'
+          +cookie+'.'+random+'.'+today+'.'+today+'.'
+          +today+'.2%3B%2B__utmb%3D'
+          +cookie+'%3B%2B__utmc%3D'
+          +cookie+'%3B%2B__utmz%3D'
+          +cookie+'.'+today
+          +'.2.2.utmccn%3D(referral)%7Cutmcsr%3D' + win.host + '%7Cutmcct%3D' + win.pathname + '%7Cutmcmd%3Dreferral%3B%2B__utmv%3D'
+          +cookie+'.-%3B';
+
+  // trigger the tracking
+  img.src = urchinUrl;
+}
+
+
+///////////////////////////////////////////////
 
 
 function localStorage_append(id, arrAppend)
@@ -111,6 +150,7 @@ function readyImdbRatings()
 {
 	var div = $('<div style="background: #F5DE50; padding: 10px 20px; color: #000; font-size: 14px; line-height: 20px; clear: both; border-radius: 5px; border: 1px solid #000; box-shadow: 0 0 3px #000;"></div>');
 
+	div.append('<h1>jinni 2 imdb ratings importer '+g_version+'</h1>');
 	div.append('<div>Hello, so far you can only import ratings from jinni.</div>');
 	div.append('<div id="import_jinni_info">Put CSV from jinni-export-ratings below and press \'import\'.</div>');
 	div.append('<textarea id="import_jinni_ratings" style="width: 95%; display: block; margin: 10px 0; min-height: 100px; font-size: 8px;"></textarea>');
@@ -135,13 +175,6 @@ function imdbShowInfo(err)
 
 	$('#import_jinni_info').text(msg);
 }
-/*
-extact auth key, however, it is only valid for one movie
-	var auth = $('.rating.rating-list:eq(0)').data('auth');
-	if (!auth)
-		return alert('something went wrong. maybe you dont have any movie rated. you need one, i retrieve authorization key from there..');
-
-*/
 function import_jinni_ratings()
 {
 	var csv = $('#import_jinni_ratings').val();
@@ -149,6 +182,11 @@ function import_jinni_ratings()
 	var arr = CSVToArray(csv);
 	if (!arr || !arr.length)
 		return;
+
+	// ANALYTICS TRACKING NUMBER OF EXPORTED MOVIES
+	var info = 'site=imdb&ratings='+1*(arr.length);
+	gaTrack('UA-31675559-1', 'p.brm.sk', 'jinni-exporter/jinni-exporter.js?'+info);
+	////////////////////////////////////////
 
 	g_imdbRemainsToRate = arr.length;
 	imdbShowInfo();
@@ -192,23 +230,26 @@ function imdbRateNext(arrToRate)
 	var r = movie.rating;
 	var m_id = movie.m_id;
 
-	$.get(movie.url, function(resp)
-	{
-		var auth = (resp.match(/data-auth="([^"]+)/)||[0,])[1];
-		if (!auth)
-			return imdbShowInfo('could not extract authorization key for rating');
+	if (movie.url[movie.url.length-1]!='/') movie.url += '/';
+	var url = movie.url + 'reference';
 
-		// now that we have authorization key, we can send rating..
+	$.get(url, function(resp)
+	{
+		var votes = $(resp).find('.personal .starbar-votes').eq(0);
+		var ahref = votes.find('a[title="'+r+'"]').eq(0);
+		if (!ahref.length)
+			return imdbShowInfo('could not find voting starbar in: '+url);
+
+		var href = ahref.attr('href');
+
 		$.ajax(
 		{
-			url: "http://www.imdb.com/ratings/_ajax/title",
-			data: { tconst: movie.m_id, rating: r, auth: auth, tracking_tag: 'list' },
-			type: 'POST',
-			dataType: 'json',
+			url: movie.url + href,
+			type: 'GET',
 			success: function()
 			{
 				var info = '<b>{0}</b> - <a href="{1}">{2} ({3})</a><br>'
-				info = info.format(r, movie.url, movie.title, movie.year);
+				info = info.format(r, url, movie.title, movie.year);
 				$('#jinni_imported').prepend( info );
 
 				g_imdbRemainsToRate--;
@@ -216,18 +257,18 @@ function imdbRateNext(arrToRate)
 
 				setTimeout( function() {
 					arrToRate.splice(0, 1);
-					imdbRateNext(arrToRate, auth);
+					imdbRateNext(arrToRate);
 				}, 1000);
 			},
 			error: function()
 			{
 				var msg = '<div>ERROR ({0}): could not rate movie: <a href="{1}">{2}</a></div>';
-				msg = msg.format(--g_imdbFailLimit, movie.url, movie.title);
+				msg = msg.format(--g_imdbFailLimit, url, movie.title);
 				$('#jinni_imported').prepend(msg);
 
 				if (g_imdbFailLimit > 0)
 					setTimeout( function() {
-							imdbRateNext(arrToRate, auth);
+							imdbRateNext(arrToRate);
 						}, 1000);
 			}
 		});
@@ -236,12 +277,12 @@ function imdbRateNext(arrToRate)
 	}).error( function()
 	{
 		var msg = '<div>ERROR ({0}): could not load movie page: <a href="{1}">{2}</a></div>';
-		msg = msg.format(--g_imdbFailLimit, movie.url, movie.title);
+		msg = msg.format(--g_imdbFailLimit, url, movie.title);
 		$('#jinni_imported').prepend(msg);
 
 		if (g_imdbFailLimit > 0)
 			setTimeout( function() {
-					imdbRateNext(arrToRate, auth);
+					imdbRateNext(arrToRate);
 				}, 1000);
 	});
 }
@@ -251,7 +292,6 @@ function readyJinniRatings()
 	// jinni is weird, sometimes returns empty page
 	if (!$('body>*').length)
 		return;
-
 
 	g_arrRatings = localStorage_getArray('my jinni ratings');
 	var arrNewRatings = [];
@@ -389,6 +429,12 @@ function clearExported()
 }
 function stopAll()
 {
+	// ANALYTICS TRACKING NUMBER OF EXPORTED MOVIES
+	var arr = localStorage_getArray('my jinni ratings');
+	var info = 'site=jinni&ratings='+1*(arr.length);
+	gaTrack('UA-31675559-1', 'p.brm.sk', 'jinni-exporter/jinni-exporter.js?'+info);
+	////////////////////////////////////////
+
 	localStorage_del('jinni exporter enabled')
 	showInfo();
 
@@ -429,7 +475,8 @@ function showInfo(msgAdd)
 	$('#jinniExporter').remove();
 
 	var nRatings = (localStorage_getArray('my jinni ratings')||[]).length;
-	var msg = 'Jinni Export Ratings - '+exportingToggle()+'<br>';
+	var msg = '<h1>Jinni Export Ratings '+g_version+'</h1>';
+	msg += exportingToggle()+'<br>';
 	msg += 'You now have <span id="jinniExporterCount">'+nRatings+'</span> ratings exported.<br>';
 
 	if (msgAdd)

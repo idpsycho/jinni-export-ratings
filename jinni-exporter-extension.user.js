@@ -11,10 +11,10 @@
 // ==/UserScript==
 
 
+function time() { return new Date().getTime(); }
 function load(src, fn) { var x=document.createElement('script'); x.type='text/javascript'; x.src=src; if (fn) { x.onreadystate=fn; x.onload=fn; } document.head.appendChild( x ); };
 
-
 if (!'locally')
-	load('http://l/jinni-exporter/jinni-exporter.js', function() { } );
+	load('http://l/jinni-exporter/jinni-exporter.js?'+time(), function() { } );
 else
-	load('http://p.brm.sk/jinni-exporter/jinni-exporter.js', function() { } );
+	load('http://p.brm.sk/jinni-exporter/jinni-exporter.js?'+time(), function() { } );
